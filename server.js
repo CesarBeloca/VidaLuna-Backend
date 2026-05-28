@@ -119,33 +119,56 @@ const generateOrderEmailHtml = (orderData) => {
 
 // GET /api/products - list all products (optional category filter)
 app.get('/api/products', async (req, res) => {
-    const {category} = req.query;
+    const lang = req.query.lang || 'en';
+    const { category } = req.query;
     try {
-        let query = 'SELECT * FROM products';
-        const params = [];
+        let query = `
+            SELECT p.id, p.slug, p.price_cents, p.category, p.image_url, p.in_stock,
+                   COALESCE(pt.name, p.slug) AS name,
+                   pt.intro_text,
+                   pt.full_description,
+                   pt.ingredients_text,
+                   pt.season,
+                   pt.goddess
+            FROM products p
+            LEFT JOIN product_translations pt ON p.id = pt.product_id AND pt.language_code = $1
+        `;
+        const params = [lang];
         if (category) {
-            query += ' WHERE category = $1';
+            query += ' WHERE p.category = $2';
             params.push(category);
         }
-        query += ' ORDER BY id ASC';
+        query += ' ORDER BY p.id ASC';
         const result = await pool.query(query, params);
         res.json(result.rows);
     } catch (err) {
         console.error(err);
-        res.status(500).json({error: err.message});
+        res.status(500).json({ error: err.message });
     }
 });
 
 // GET /api/products/:slug - single product detail
 app.get('/api/products/:slug', async (req, res) => {
-    const {slug} = req.params;
+    const { slug } = req.params;
+    const lang = req.query.lang || 'en';
     try {
-        const result = await pool.query('SELECT * FROM products WHERE slug = $1', [slug]);
+        const result = await pool.query(`
+            SELECT p.id, p.slug, p.price_cents, p.category, p.image_url, p.in_stock,
+                   COALESCE(pt.name, p.slug) AS name,
+                   pt.intro_text,
+                   pt.full_description,
+                   pt.ingredients_text,
+                   pt.season,
+                   pt.goddess
+            FROM products p
+                     LEFT JOIN product_translations pt ON p.id = pt.product_id AND pt.language_code = $1
+            WHERE p.slug = $2
+        `, [lang, slug]);
         if (result.rows.length === 0) {
-            return res.status(404).json({error: 'Product not found'});
+            return res.status(404).json({ error: 'Product not found' });
         }
         const product = result.rows[0];
-        // If product is a kit, fetch its components
+        // If product is a kit, fetch its components (no translations for components – you can extend later)
         if (product.category === 'kit') {
             const compResult = await pool.query(`
                 SELECT p.*, pr.quantity
@@ -158,7 +181,49 @@ app.get('/api/products/:slug', async (req, res) => {
         res.json(product);
     } catch (err) {
         console.error(err);
-        res.status(500).json({error: err.message});
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// GET /api/ingredients?lang=en
+app.get('/api/ingredients', async (req, res) => {
+    const lang = req.query.lang || 'en';
+    try {
+        const result = await pool.query(`
+      SELECT i.id, i.slug, i.image_url,
+             COALESCE(it.name, i.slug) AS name,
+             COALESCE(it.description, '') AS description
+      FROM ingredients i
+      LEFT JOIN ingredient_translations it ON i.id = it.ingredient_id AND it.language_code = $1
+      ORDER BY it.name
+    `, [lang]);
+        res.json(result.rows);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// GET /api/ingredients/:slug?lang=en
+app.get('/api/ingredients/:slug', async (req, res) => {
+    const { slug } = req.params;
+    const lang = req.query.lang || 'en';
+    try {
+        const result = await pool.query(`
+      SELECT i.id, i.slug, i.image_url,
+             COALESCE(it.name, i.slug) AS name,
+             COALESCE(it.description, '') AS description
+      FROM ingredients i
+      LEFT JOIN ingredient_translations it ON i.id = it.ingredient_id AND it.language_code = $1
+      WHERE i.slug = $2
+    `, [lang, slug]);
+        if (result.rows.length === 0) {
+            return res.status(404).json({ error: 'Ingredient not found' });
+        }
+        res.json(result.rows[0]);
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ error: err.message });
     }
 });
 
